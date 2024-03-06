@@ -23,10 +23,10 @@ let loadFixture: ReturnType<typeof createFixtureLoader>;
 
 const ONE_DAY = 24 * 3600;
 const TWO_DAY = 2 * 24 * 3600;
-const ONE_WEEK = 7 * 24 * 3600;
+const TWO_MONTHS = 60 * 24 * 3600;
 const THREE_WEEK = 21 * 24 * 3600;
 const YEAR = 365 * 24 * 3600;
-enum StakingPeriod { OneWeek, ThreeWeeks, TwoMonths, ThreeMonths, FourMonths, SixMonths, OneYear }
+enum StakingPeriod { ThreeWeeks, TwoMonths, ThreeMonths, FourMonths, SixMonths, OneYear }
 
 describe("Script Staking", function () {
     async function deployContractsFixture() {
@@ -89,7 +89,7 @@ describe("Script Staking", function () {
           await staking.connect(owner).setnft_price([0,1,2,3,4,5], [tokens("1"),tokens("1"),tokens("1"), tokens("1"), tokens("1"), tokens("1")]);
         });
     
-        it("alice stakes 100000 with one week", async function () {
+        it("alice stakes 100000 with three week", async function () {
             // getting timestamp
             const blockNumBefore = await ethers.provider.getBlockNumber();
             const blockBefore = await ethers.provider.getBlock(blockNumBefore);
@@ -98,7 +98,7 @@ describe("Script Staking", function () {
 
             const amount = tokens("10000");
             await scpToken.connect(alice).approve(staking.address, amount);
-            await expect(staking.connect(alice).stake(StakingPeriod.OneWeek, amount)).to.be.revertedWith('Staking: Unable to stake before deposit start!');
+            await expect(staking.connect(alice).stake(StakingPeriod.ThreeWeeks, amount)).to.be.revertedWith('Staking: Unable to stake before deposit start!');
 
             // advance time by one day and mine a new block
             await time.increase(ONE_DAY);
@@ -106,7 +106,7 @@ describe("Script Staking", function () {
             let balance = await scpToken.balanceOf(alice.address);
             console.log("alice balance before staking: ", balance);
             
-            await staking.connect(alice).stake(StakingPeriod.OneWeek, amount);
+            await staking.connect(alice).stake(StakingPeriod.ThreeWeeks, amount);
             balance = await scpToken.balanceOf(alice.address);
             console.log("alice balance after staking: ", balance);
             expect(balance).to.equal(tokens("1990000"));
@@ -125,12 +125,12 @@ describe("Script Staking", function () {
             let balance = await staking.connect(alice).totalAmount();
             console.log("staking total before staking: ", balance);
 
-            await staking.connect(alice).stake_nft(StakingPeriod.OneWeek, [BigNumber.from(1)]);
+            await staking.connect(alice).stake_nft(StakingPeriod.ThreeWeeks, [BigNumber.from(1)]);
             balance = await staking.connect(alice).totalAmount();
             console.log("staking total after staking: ", balance);
         });
 
-        it("bob stakes 100000 with three week", async function () {
+        it("bob stakes 100000 with two months", async function () {
             // getting timestamp
             const blockNumBefore = await ethers.provider.getBlockNumber();
             const blockBefore = await ethers.provider.getBlock(blockNumBefore);
@@ -142,7 +142,7 @@ describe("Script Staking", function () {
             console.log("bob balance before staking: ", balance);
             const amount = tokens("10000");
             await scpToken.connect(bob).approve(staking.address, amount);
-            await staking.connect(bob).stake(StakingPeriod.ThreeWeeks, amount);
+            await staking.connect(bob).stake(StakingPeriod.TwoMonths, amount);
             balance = await scpToken.balanceOf(bob.address);
             console.log("bob balance after staking: ", balance);
             expect(balance).to.equal(tokens("1990000"));
@@ -150,14 +150,14 @@ describe("Script Staking", function () {
             expect(await staking.totalAmount()).to.equal(tokens("20001")); //add 1 for nft 
         });
 
-        it("claim reward of alice in one week", async function () {
+        it("claim reward of alice in three week", async function () {
             // getting timestamp
             const blockNumBefore = await ethers.provider.getBlockNumber();
             const blockBefore = await ethers.provider.getBlock(blockNumBefore);
             const timestampBefore = blockBefore.timestamp;
             console.log("current time : ", timestampBefore);
             // advance time by one day and mine a new block
-            await time.increase(ONE_WEEK);
+            await time.increase(THREE_WEEK);
                         
             let balance = await scpToken.balanceOf(alice.address);
             console.log("alice balance before claim: ", balance);
@@ -171,14 +171,14 @@ describe("Script Staking", function () {
             expect(fbalance).to.greaterThan(balance.add(amount));
         });
 
-        it("claim reward of bob in three week", async function () {
+        it("claim reward of bob in two months", async function () {
             // getting timestamp
             const blockNumBefore = await ethers.provider.getBlockNumber();
             const blockBefore = await ethers.provider.getBlock(blockNumBefore);
             const timestampBefore = blockBefore.timestamp;
             console.log("current time : ", timestampBefore);
             // advance time by one day and mine a new block
-            await time.increase(THREE_WEEK);
+            await time.increase(TWO_MONTHS);
                         
             let balance = await scpToken.balanceOf(bob.address);
             console.log("bob balance before claim: ", balance);
@@ -194,8 +194,8 @@ describe("Script Staking", function () {
 
         it("staked amounts per staking period", async function () {
             
-            expect((await staking.stakingOptions(StakingPeriod.OneWeek)).total).to.equal(tokens("10001")); //add 1 for nft 
-            expect((await staking.stakingOptions(StakingPeriod.ThreeWeeks)).total).to.equal(tokens("10000"));
+            expect((await staking.stakingOptions(StakingPeriod.ThreeWeeks)).total).to.equal(tokens("10001")); //add 1 for nft 
+            expect((await staking.stakingOptions(StakingPeriod.TwoMonths)).total).to.equal(tokens("10000"));
         });
 
         it("alice can not unstake before stakingEnd", async function () {

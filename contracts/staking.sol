@@ -88,10 +88,11 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     uint256 public lockedAmount;            //amount in SCPT token
     uint256 public depositLimit;            //amount in SCPT token
     uint256 public totalAmount = 0;         //amount in SCPT token
+    uint256 public totalNftCnt = 0;         // total count of staked nft
 
     uint256 public rateScpt = 223 * (10 ** 16);                // rate value for SPAY/SCPT (with decimal 18) for 1e18 SCPT    2.228956545242153...
 
-    enum StakingPeriod { OneWeek, ThreeWeeks, TwoMonths, ThreeMonths, FourMonths, SixMonths, OneYear }
+    enum StakingPeriod { ThreeWeeks, TwoMonths, ThreeMonths, FourMonths, SixMonths, OneYear }
 
     mapping(uint256 => uint256) public nftPrices;     //price of Glasspass id in SCPT token
 
@@ -130,7 +131,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     event StakeRewards(address indexed participant, uint256 amount);
     event Stake_Nft(address indexed participant, uint256[] ids);
     event Unstake(address indexed participant, uint256 amount);
-    event RewordClaim(address indexed participant, uint256 amount);
+    event RewardClaim(address indexed participant, uint256 amount);
     event Withdraw();
 
     constructor(
@@ -182,15 +183,13 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         lockedAmount = _lockedAmount;       // init lock balance
         depositLimit = _depositLimit;
 
-        stakingOptions[StakingPeriod.OneWeek] = StakingOption(1 weeks, 1, 0, 0);
-        stakingOptions[StakingPeriod.ThreeWeeks] = StakingOption(3 weeks, 3, 0, 0);
-        stakingOptions[StakingPeriod.TwoMonths] = StakingOption(60 days, 7, 0, 0);
-        stakingOptions[StakingPeriod.ThreeMonths] = StakingOption(90 days, 9, 0, 0);
-        stakingOptions[StakingPeriod.FourMonths] = StakingOption(120 days, 15, 0, 0);
-        stakingOptions[StakingPeriod.SixMonths] = StakingOption(180 days, 17, 0, 0);
+        stakingOptions[StakingPeriod.ThreeWeeks] = StakingOption(3 weeks, 1, 0, 0);
+        stakingOptions[StakingPeriod.TwoMonths] = StakingOption(60 days, 3, 0, 0);
+        stakingOptions[StakingPeriod.ThreeMonths] = StakingOption(90 days, 5, 0, 0);
+        stakingOptions[StakingPeriod.FourMonths] = StakingOption(120 days, 7, 0, 0);
+        stakingOptions[StakingPeriod.SixMonths] = StakingOption(180 days, 12, 0, 0);
         stakingOptions[StakingPeriod.OneYear] = StakingOption(365 days, 28, 0, 0);
 
-        lockData[StakingPeriod.OneWeek] = lockedAmount / 40;
         lockData[StakingPeriod.ThreeWeeks] = lockedAmount * 3 / 40;
         lockData[StakingPeriod.TwoMonths] = lockedAmount * 7 / 40;
         lockData[StakingPeriod.ThreeMonths] = lockedAmount * 9 / 40;
@@ -228,7 +227,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         uint256 newBalance = stakingData[_msgSender()].scptAmount + amount;
         require(newBalance + stakingNftData[_msgSender()].nftBalance <= depositLimit, "Staking: Amount exceeds deposit limit");
         if (stakingData[_msgSender()].scptAmount > 0) {
-            stakingData[_msgSender()].previousReward = calculateEarnedAmount(_msgSender());
+            stakingData[_msgSender()].previousReward += calculateEarnedAmount(_msgSender());
         }
         
         stakingData[_msgSender()].scptAmount = newBalance;
@@ -275,12 +274,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         require(newBalance + stakingData[_msgSender()].scptAmount <= depositLimit, "Staking: Amount exceeds deposit limit");
         
         if (stakingNftData[_msgSender()].nftBalance > 0) {
-            stakingNftData[_msgSender()].previousReward = calculateEarnedAmountForNft(_msgSender());
+            stakingNftData[_msgSender()].previousReward += calculateEarnedAmountForNft(_msgSender());
         }
 
         stakingNftData[_msgSender()].nftBalance = newBalance;
-
-        totalAmount += amount;
         
         uint256 count = stakingNftData[_msgSender()].nftCnt;
         for (uint256 i = 0; i < ids.length; i++ ){
@@ -293,8 +290,11 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         stakingNftData[_msgSender()].lockPeriod = stakingPeriod;
         stakingNftData[_msgSender()].timeSinceLastReward = block.timestamp;
 
-        stakingOptions[stakingPeriod].nftCnt = stakingOptions[stakingPeriod].nftCnt + count;
+        stakingOptions[stakingPeriod].nftCnt = stakingOptions[stakingPeriod].nftCnt + ids.length;
         stakingOptions[stakingPeriod].total = newTotalAmount;
+
+        totalAmount += amount;
+        totalNftCnt += ids.length;
 
         emit Stake_Nft(_msgSender(), ids);
 
@@ -304,13 +304,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     // stake rewards SCPT
     function stakeRewards() external nonReentrant returns(bool) {
         require(block.timestamp >= depositStart , "Staking: Unable to stake before deposit start!");
-        uint256 amount = calculateEarnedAmount(_msgSender());
+        uint256 amount = calculateEarnedAmount(_msgSender()) + stakingData[_msgSender()].previousReward;
         StakingPeriod stakingPeriod = stakingData[_msgSender()].lockPeriod;
-        require(amount > 0, "Staking: Insufficient rewards");
+        require(amount > 0, "Staking: Insufficient rewards");        
         
-        uint256 allowance = IERC20(scpt).allowance(_msgSender(), address(this));
-        require(allowance >= amount, "Staking: Insufficient allowance");
-
         uint256 newTotalAmount = stakingOptions[stakingPeriod].total + amount;
         require(newTotalAmount <= lockData[stakingPeriod], "Staking: Amount exceeds total lock amount");
 
@@ -330,32 +327,6 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
 
         return true;
     }
-
-    function increaseStakingPeriod(StakingPeriod periodOption) external  returns (bool){
-        require(stakingOptions[periodOption].duration > 0, "Invalid staking duration");
-        require(stakingData[_msgSender()].lockPeriod < periodOption, "New unlock time must be in the future");
-
-        StakingPeriod previousPeriod = stakingData[_msgSender()].lockPeriod;
-        stakingOptions[previousPeriod].total = stakingOptions[previousPeriod].total - stakingData[_msgSender()].scptAmount;
-        stakingData[_msgSender()].lockPeriod =  periodOption;
-        stakingOptions[periodOption].total = stakingOptions[periodOption].total + stakingData[_msgSender()].scptAmount;
-
-        return  true;
-    }
-
-    function increaseStakingPeriodNft(StakingPeriod periodOption) external  returns (bool){
-        require(stakingOptions[periodOption].duration > 0, "Invalid staking duration");
-        require(stakingNftData[_msgSender()].lockPeriod < periodOption, "New unlock time must be in the future");
-
-        StakingPeriod previousPeriod = stakingNftData[_msgSender()].lockPeriod;
-        stakingOptions[previousPeriod].total = stakingOptions[previousPeriod].total - stakingNftData[_msgSender()].nftBalance;
-        stakingOptions[previousPeriod].nftCnt = stakingOptions[previousPeriod].nftCnt - stakingNftData[_msgSender()].nftCnt;
-        stakingNftData[_msgSender()].lockPeriod =  periodOption;
-        stakingOptions[periodOption].total = stakingOptions[periodOption].total + stakingNftData[_msgSender()].nftBalance;
-        stakingOptions[periodOption].nftCnt = stakingOptions[periodOption].nftCnt + stakingNftData[_msgSender()].nftCnt;
-
-        return  true;
-    } 
 
     function unstake() external returns(bool) {
         require(block.timestamp >= stakingEnd , "Staking: Unable to unstake before stakingEnd!");
@@ -400,7 +371,8 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
 
         stakingNftData[_msgSender()].nftBalance = 0;        
         stakingNftData[_msgSender()].stakeTime = 0;
-        SafeERC20.safeTransfer(scpt, _msgSender(), balance);
+        totalNftCnt -= stakingNftData[_msgSender()].nftCnt;
+        
         for(uint256 i = 0; i < stakingNftData[_msgSender()].nftCnt; i++){
             IERC721(glasspass).safeTransferFrom( address(this), _msgSender(), stakingNftData[_msgSender()].nfts[i]);
         }
@@ -410,6 +382,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
         delete stakingNftData[_msgSender()].nfts;
 
         totalAmount -= balance;
+        
         emit Unstake(_msgSender(), balance);
 
         return true;
@@ -418,8 +391,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     // claim reward as SCPT
     function claimReward(address account) public nonReentrant returns (bool){
         uint256 balance = stakingData[account].scptAmount;
-
         require(balance > 0, "Staking: Insufficient balance");
+        uint256 stakedduration = block.timestamp - stakingData[account].stakeTime;
+        require(stakedduration > 7 days, "Staking: rewards could be claimed later than 7 days from staked time");
+        
         uint256 earnedAmount = calculateEarnedAmount(account) + stakingData[account].previousReward;
 
         if (earnedAmount > 0) {
@@ -428,7 +403,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
             stakingData[account].timeSinceLastReward = block.timestamp;
         }
 
-        emit RewordClaim(account, earnedAmount);
+        emit RewardClaim(account, earnedAmount);
 
         return  true;
     }
@@ -436,8 +411,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     // claim reward as SCPT
     function claimRewardNft(address account) public nonReentrant returns (bool){
         uint256 balance = stakingNftData[account].nftBalance;
-
         require(balance > 0, "Staking: Insufficient balance");
+        uint256 stakedduration = block.timestamp - stakingNftData[account].stakeTime;
+        require(stakedduration > 7 days, "Staking: rewards could be claimed later than 7 days from staked time");
+        
         uint256 earnedAmount = calculateEarnedAmountForNft(account) + stakingNftData[account].previousReward;
 
         if (earnedAmount > 0) {
@@ -446,7 +423,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
             stakingNftData[account].timeSinceLastReward = block.timestamp;
         }
 
-        emit RewordClaim(account, earnedAmount);
+        emit RewardClaim(account, earnedAmount);
 
         return  true;
     }
@@ -454,8 +431,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     // claim reward as SPAY
     function claimRewardSpay() public nonReentrant returns (bool){
         uint256 balance = stakingData[_msgSender()].scptAmount;
-
         require(balance > 0, "Staking: Insufficient balance");
+        uint256 stakedduration = block.timestamp - stakingData[_msgSender()].stakeTime;
+        require(stakedduration > 7 days, "Staking: rewards could be claimed later than 7 days from staked time");
+        
         uint256 earnedAmount = calculateEarnedAmount(_msgSender()) + stakingData[_msgSender()].previousReward;
         if (earnedAmount > 0) {
             uint256 spayAmount = earnedAmount * rateScpt / 1e18;
@@ -464,7 +443,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
             stakingData[_msgSender()].timeSinceLastReward = block.timestamp;
         }
 
-        emit RewordClaim(_msgSender(),earnedAmount);
+        emit RewardClaim(_msgSender(),earnedAmount);
 
         return  true;
     }
@@ -472,8 +451,10 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
     // claim reward as SPAY
     function claimRewardNftSpay() public nonReentrant returns (bool){
         uint256 balance = stakingNftData[_msgSender()].nftBalance;
-
         require(balance > 0, "Staking: Insufficient balance");
+        uint256 stakedduration = block.timestamp - stakingNftData[_msgSender()].stakeTime;
+        require(stakedduration > 7 days, "Staking: rewards could be claimed later than 7 days from staked time");
+        
         uint256 earnedAmount = calculateEarnedAmountForNft(_msgSender()) + stakingNftData[_msgSender()].previousReward;
         if (earnedAmount > 0) {
             uint256 spayAmount = earnedAmount * rateScpt / 1e18;
@@ -482,7 +463,7 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
             stakingNftData[_msgSender()].timeSinceLastReward = block.timestamp;
         }
 
-        emit RewordClaim(_msgSender(),earnedAmount);
+        emit RewardClaim(_msgSender(),earnedAmount);
 
         return  true;
     }
@@ -508,11 +489,8 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
 
         uint256 duration = calculateUnlockTime(stakingData[account].lockPeriod);
         uint256 annualReward= stakingOptions[stakingData[account].lockPeriod].rewardPercentage;
-        if (stakingDuration >= duration) {
-            return (balance * annualReward * stakingDuration) / (100 * duration);
-        } else {
-            return 0;
-        }
+        
+        return (balance * annualReward * stakingDuration) / (100 * duration);
     }
 
     function calculateEarnedAmountForNft(address account) public view returns(uint256) {
@@ -524,11 +502,8 @@ contract ScriptStaking is Ownable2Step, ReentrancyGuard, IERC721Receiver {
 
         uint256 duration = calculateUnlockTime(stakingNftData[account].lockPeriod);
         uint256 annualReward= stakingOptions[stakingNftData[account].lockPeriod].rewardPercentage;
-        if (stakingDuration >= duration) {
-            return (balance * annualReward * stakingDuration) / (100 * duration);
-        } else {
-            return 0;
-        }
+
+        return (balance * annualReward * stakingDuration) / (100 * duration);
     }
 
     function setRateScpt(uint256 _rateScpt) public onlyOwner() returns(bool) {
